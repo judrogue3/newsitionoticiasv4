@@ -22,7 +22,20 @@ export default function NewsCard({ title, content, image, category, date, vendor
     threshold: 0.1,
   });
 
-  const newsUrl = vendorId && newsId ? `/news/${vendorId}-${newsId}` : '#';
+  // Construir la URL correctamente para DF.cl
+  let newsUrl = '#';
+  if (vendorId && newsId) {
+    // Si es DF.cl, usar el formato especial df-[id]
+    if (vendorId.toLowerCase() === 'df.cl') {
+      // Asegurarse de que el ID no contenga ya el prefijo 'df-'
+      const cleanId = newsId.startsWith('df-') ? newsId : `df-${newsId}`;
+      newsUrl = `/news/${cleanId}`;
+      console.log(`Construyendo URL para noticia DF.cl: ${newsUrl} (ID original: ${newsId})`);
+    } else {
+      // Para otros proveedores, mantener el formato original
+      newsUrl = `/news/${vendorId}-${newsId}`;
+    }
+  }
 
   return (
     <motion.div

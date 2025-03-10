@@ -2,7 +2,6 @@ import { Suspense } from 'react';
 import { Newspaper, Building2, Building, BookOpen, LineChart, BarChart, TrendingUp, ArrowLeftRight } from 'lucide-react';
 import FirebaseFeaturedNews from '@/components/FirebaseFeaturedNews';
 import FirebaseVendorSection from '@/components/FirebaseVendorSection';
-import DFNewsSection from '@/components/DFNewsSection';
 
 // Export vendors so it can be imported in other files
 export const vendors = [

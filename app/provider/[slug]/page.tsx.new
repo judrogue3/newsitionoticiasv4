@@ -47,10 +47,12 @@ export default function ProviderPage({ params }: Props) {
                               slug;
 
   return (
-    <ProviderClient 
-      slug={slug}
-      provider={provider} 
-      normalizedProviderId={normalizedProviderId} 
-    />
+    <Suspense fallback={<div className="container py-8 text-center">Cargando...</div>}>
+      <ProviderClient 
+        slug={slug} 
+        normalizedProviderId={normalizedProviderId} 
+        provider={provider} 
+      />
+    </Suspense>
   );
 }
