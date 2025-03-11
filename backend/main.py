@@ -187,6 +187,38 @@ async def test_df_extract(url: str):
             "error": str(e)
         }
 
+@app.get("/api/test-df-ids")
+async def test_df_ids():
+    """
+    Endpoint para generar algunos IDs de prueba para artículos de DF.cl
+    """
+    test_articles = [
+        {
+            "id": "df-empresas-actualidad-amazon-x-meta-prepara-modelo-IA",
+            "title": "Amazon, X y Meta preparan modelo de IA",
+            "url": "https://www.df.cl/empresas/actualidad/amazon-x-meta-prepara-modelo-IA"
+        },
+        {
+            "id": "df-mercados-bolsa-monedas-mercados-globales-acciones-siguen-en-trayectoria-ascendente-impulsadas",
+            "title": "Mercados globales: acciones siguen en trayectoria ascendente, impulsadas por rally de Wall Street",
+            "url": "https://www.df.cl/mercados/bolsa-monedas/mercados-globales-acciones-siguen-en-trayectoria-ascendente-impulsadas"
+        },
+        {
+            "id": "df-empresas-industria-como-funciona-la-nueva-politica-de-inversiones-de-codelco-y-cuales-son-los",
+            "title": "Cómo funciona la nueva política de inversiones de Codelco y cuáles son los proyectos priorizados",
+            "url": "https://www.df.cl/empresas/industria/como-funciona-la-nueva-politica-de-inversiones-de-codelco-y-cuales-son-los"
+        },
+        {
+            "id": "df-mercados-banca-fintech-banco-santander-chile-elige-a-roman-blanco-como-nuevo-presidente",
+            "title": "Banco Santander Chile elige a Román Blanco como nuevo presidente",
+            "url": "https://www.df.cl/mercados/banca-fintech/banco-santander-chile-elige-a-roman-blanco-como-nuevo-presidente"
+        }
+    ]
+    
+    return {
+        "test_articles": test_articles
+    }
+
 @app.get("/api/test-df-articles")
 async def test_df_articles():
     """Endpoint para extraer y probar artículos recientes de DF.cl"""

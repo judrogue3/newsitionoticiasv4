@@ -133,8 +133,30 @@ export async function getNewsById(newsId: string): Promise<NewsItem | null> {
   console.log(`getNewsById llamado con ID: ${newsId}`);
   
   try {
-    // Si no es un ID de DF.cl (no comienza con df-), obtener desde Firebase usando los vendors estáticos
-    if (!newsId.startsWith('df-')) {
+    // Verificar si es una noticia de DF.cl (comienza con df.cl- o df-)
+    if (newsId.startsWith('df.cl-') || newsId.startsWith('df-')) {
+      console.log('Obteniendo noticia de DF.cl con ID:', newsId);
+      
+      // Mantener el ID tal como viene, para respetar el formato que espera el backend
+      // El backend ya sabe manejar tanto df.cl-[hash] como df-[hash]
+      
+      // Obtener la noticia directamente del endpoint principal
+      console.log(`Intentando obtener noticia de DF.cl: /news/${newsId}`);
+      const response = await fetch(`${API_BASE_URL}/news/${newsId}`, {
+        cache: 'no-store'
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        console.log('Noticia de DF.cl obtenida con éxito');
+        return data;
+      }
+      
+      console.log('No se encontró la noticia en la API.');
+      return null;
+    } 
+    else {
+      // Para otros proveedores, obtener desde la API normal
       console.log('Obteniendo noticia normal (no DF.cl):', newsId);
       const response = await fetch(`${API_BASE_URL}/news/${newsId}`, {
         cache: 'no-store'
@@ -144,42 +166,9 @@ export async function getNewsById(newsId: string): Promise<NewsItem | null> {
         return await response.json();
       }
       return null;
-    } 
-    
-    // Si es un ID con formato df-[hash], obtener el detalle desde la API
-    else {
-      console.log('Obteniendo noticia de DF.cl con ID:', newsId);
-      const dfId = newsId.substring(3); // Eliminar 'df-' del principio
-      
-      // Intentar primero el endpoint específico de scraping para DF
-      console.log(`Intentando endpoint específico de scraping para DF.cl: /news/df-scrape/${dfId}`);
-      const dfResponse = await fetch(`${API_BASE_URL}/news/df-scrape/${dfId}`, {
-        cache: 'no-store'
-      });
-      
-      if (dfResponse.ok) {
-        const data = await dfResponse.json();
-        console.log('Noticia obtenida con éxito a través del scraping específico');
-        return data;
-      }
-      
-      // Si el scraping específico falla, intentar obtener la noticia con el ID completo
-      console.log(`Intentando obtener con ID completo: /news/${newsId}`);
-      const response = await fetch(`${API_BASE_URL}/news/${newsId}`, {
-        cache: 'no-store'
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        console.log('Noticia obtenida con éxito de la API con ID completo');
-        return data;
-      }
-      
-      console.log('No se encontró la noticia en la API. Todos los intentos fallaron.');
-      return null;
     }
   } catch (error) {
-    console.error(`Error al obtener noticia con ID ${newsId}:`, error);
+    console.error('Error al obtener noticia por ID:', error);
     return null;
   }
 }

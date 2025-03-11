@@ -25,11 +25,20 @@ export default function FirebaseFeaturedNews() {
     const fetchFeaturedNews = async () => {
       try {
         setLoading(true);
+        setError(null);
+        console.log('Intentando obtener noticias destacadas de Bloomberg');
+        
         // Obtener específicamente noticias de Bloomberg
         const news = await getNewsByProvider('Bloomberg', { limit: 5 });
+        console.log(`Recibidas ${news.length} noticias de Bloomberg`);
+        
         if (news && news.length > 0) {
           // Seleccionar la primera noticia como destacada
           setFeaturedNews(news[0]);
+          console.log('Noticia destacada establecida:', news[0].title);
+        } else {
+          console.log('No se recibieron noticias de Bloomberg');
+          setError('No hay noticias destacadas disponibles en este momento');
         }
       } catch (err) {
         console.error('Error fetching Bloomberg featured news:', err);

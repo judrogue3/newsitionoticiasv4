@@ -25,15 +25,27 @@ export default function FirebaseVendorSection({ providerId, providerName, logo }
     const fetchNews = async () => {
       try {
         setLoading(true);
+        setError(null);
+        
         // Normalizar el ID del proveedor para asegurar que coincida con el formato esperado por el backend
-        // Bloomberg y DF.cl son los valores esperados en el backend
         const normalizedProviderId = providerId === 'bloomberg' ? 'Bloomberg' : 
-                                    providerId === 'df.cl' ? 'DF.cl' : 
-                                    providerId;
+                                   providerId === 'df.cl' ? 'DF.cl' : 
+                                   providerId;
         
         console.log(`Fetching news for provider: ${normalizedProviderId}`);
+        
+        // Agregar un pequeño retardo para evitar problemas de concurrencia con múltiples solicitudes simultáneas
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
         const newsData = await getNewsByProvider(normalizedProviderId, { limit: 8 });
-        setNews(newsData);
+        console.log(`Received ${newsData.length} news for provider ${normalizedProviderId}`);
+        
+        if (newsData && newsData.length > 0) {
+          setNews(newsData);
+        } else {
+          console.log(`No news received for provider ${normalizedProviderId}`);
+          setError(`No hay noticias disponibles de ${providerName} en este momento`);
+        }
       } catch (err) {
         console.error(`Error fetching news for ${providerName}:`, err);
         setError(`No se pudieron cargar las noticias de ${providerName}`);

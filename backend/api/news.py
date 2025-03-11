@@ -4,6 +4,8 @@ from pydantic import BaseModel
 from datetime import datetime
 from services.news_service import initialize_firebase, get_news, get_available_categories, get_available_providers, format_date
 from services.scraping_service import get_news_from_df, get_by_id_df, ScrapedNewsItem, get_by_id
+from services.serper_service import get_df_article_by_id
+from services.gemini_service import generate_summary
 import logging
 
 logger = logging.getLogger(__name__)
@@ -28,6 +30,7 @@ class News(BaseModel):
     provider: Optional[str] = None
     category: Optional[str] = None
     created_at: Optional[str] = None
+    summary: Optional[str] = None
     
     class Config:
         orm_mode = True
@@ -83,7 +86,8 @@ def save_article_to_firebase(article: News) -> bool:
             "image_url": article.image_url,
             "provider": article.provider,
             "category": article.category,
-            "created_at": article.created_at
+            "created_at": article.created_at,
+            "summary": article.summary
         }
         
         doc_ref.set(article_dict)
@@ -195,23 +199,71 @@ async def get_news_by_provider(
     limit: int = Query(20, ge=1, le=100)
 ):
     """
-    Obtener noticias de un proveedor específico.
+    Endpoint para obtener noticias por proveedor.
     """
     try:
+        logger.info(f"Buscando noticias del proveedor: {provider}")
+        
+        # Normalizar el nombre del proveedor
+        normalized_provider = provider
+        
+        # Manejar los casos especiales
+        if provider.lower() == "bloomberg":
+            normalized_provider = "Bloomberg"
+        elif provider.lower() == "df.cl":
+            normalized_provider = "DF.cl"
+        
+        logger.info(f"Nombre del proveedor normalizado: {normalized_provider}")
+        
         # Inicializar Firebase
         db = initialize_firebase()
         
-        # Obtener noticias
+        # Obtener las noticias de Firebase
         news_list = get_news(
             db=db,
             limit=limit + skip,
-            provider=provider,
+            provider=normalized_provider,
             category=category
         )
         
+        logger.info(f"Encontradas {len(news_list)} noticias para {normalized_provider}")
+        
+        # Si no hay noticias en Firebase y el proveedor es DF.cl, intentar scraping en tiempo real
+        if len(news_list) == 0 and normalized_provider == "DF.cl":
+            logger.info("No hay noticias de DF.cl en Firebase, intentando scraping en tiempo real")
+            # Aquí podríamos implementar un scraping en tiempo real si es necesario
+        
+        # Crear lista de objetos News desde los diccionarios
+        news_objects = []
+        for news_item in news_list:
+            # Asegurarse de que todos los campos requeridos estén presentes
+            news_object = {
+                "id": news_item.get("id", ""),
+                "title": news_item.get("title", ""),
+                "description": news_item.get("description", ""),
+                "content": news_item.get("content", ""),
+                "url": news_item.get("url", ""),
+                "image_url": news_item.get("image_url", ""),
+                "provider": news_item.get("provider", ""),
+                "category": news_item.get("category", ""),
+                "created_at": news_item.get("created_at", ""),
+                "summary": news_item.get("summary", "")
+            }
+            news_objects.append(news_object)
+        
+        # Eliminar duplicados basados en el ID del artículo
+        unique_news_dict = {news["id"]: news for news in news_objects}
+        unique_news_list = list(unique_news_dict.values())
+        
+        logger.info(f"Después de eliminar duplicados, quedan {len(unique_news_list)} noticias únicas")
+        
         # Aplicar paginación
-        return news_list[skip:skip + limit]
+        paginated_list = unique_news_list[skip:skip + limit]
+        logger.info(f"Retornando {len(paginated_list)} noticias paginadas")
+        
+        return paginated_list
     except Exception as e:
+        logger.error(f"Error al obtener noticias del proveedor {provider}: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error al obtener noticias del proveedor: {str(e)}")
 
 @router.get("/{news_id}", response_model=News)
@@ -230,18 +282,75 @@ async def get_news_by_id(news_id: str):
         
         # Si es una noticia de DF.cl con formato "df.cl-hash"
         if news_id.startswith('df.cl-'):
-            logger.info(f"Detectada noticia de DF.cl con formato hash: {news_id}")
+            logger.info(f"Detectada noticia de DF.cl con formato df.cl-: {news_id}")
+            
+            # Extraer el hash ID
+            hash_id = news_id[6:]  # Eliminar 'df.cl-' del principio
+            logger.info(f"Hash ID extraído: {hash_id}")
+            
+            # Usar serper para obtener el contenido del artículo
+            try:
+                logger.info(f"Obteniendo artículo de DF.cl con serper para ID: {hash_id}")
+                article_data = await get_df_article_by_id(hash_id)
+                
+                if article_data and 'content' in article_data:
+                    logger.info(f"Artículo encontrado con serper, generando resumen con Gemini")
+                    
+                    # Generar resumen con Google Gemini
+                    summary = await generate_summary(article_data['content'])
+                    
+                    # Crear objeto News con los datos obtenidos
+                    news = News(
+                        id=news_id,  # Mantener el ID original con formato df.cl-
+                        title=article_data.get('title', 'Artículo de DF.cl'),
+                        description=article_data.get('description', summary[:150] + "...") if summary else None,
+                        content=article_data.get('content', ''),
+                        url=article_data.get('url', f"https://www.df.cl/noticias/article/{hash_id}"),
+                        image_url=article_data.get('image_url', ''),
+                        provider="DF.cl",
+                        category=article_data.get('category', 'Noticias'),
+                        created_at=article_data.get('created_at', datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+                        summary=summary
+                    )
+                    
+                    # Guardar en Firebase para futuras consultas
+                    try:
+                        save_article_to_firebase(news)
+                        logger.info(f"Artículo guardado en Firebase: {news_id}")
+                    except Exception as e:
+                        logger.error(f"Error al guardar en Firebase: {str(e)}")
+                    
+                    return news
+                else:
+                    logger.warning(f"No se pudo obtener el artículo con serper para ID: {hash_id}")
+            except Exception as e:
+                logger.error(f"Error al obtener artículo con serper: {str(e)}", exc_info=True)
+            
+            # Si falla serper, usar el método anterior como fallback
+            logger.info(f"Intentando método alternativo para obtener el artículo...")
+        
+        # Si es una noticia de DF.cl con formato "df-hash" o si falló serper
+        if news_id.startswith('df-') or news_id.startswith('df.cl-'):
+            logger.info(f"Usando método de scraping alternativo para: {news_id}")
+            
+            # Normalizar el ID para el método alternativo
+            normalized_id = news_id
+            if news_id.startswith('df.cl-'):
+                normalized_id = 'df-' + news_id[6:]  # Cambiar df.cl- por df-
+            
+            logger.info(f"ID normalizado para scraping alternativo: {normalized_id}")
             
             try:
                 # Usar la función get_by_id que maneja todos los formatos posibles
-                news_item = await get_by_id(news_id)
-                logger.info(f"Resultado de get_by_id: {news_item}")
+                news_item = await get_by_id(normalized_id)
+                logger.info(f"Resultado de get_by_id alternativo: {news_item}")
                 
                 if news_item:
-                    logger.info(f"Noticia de DF.cl encontrada: {news_id}")
+                    logger.info(f"Noticia de DF.cl encontrada con método alternativo: {normalized_id}")
+                    
                     # Convertir a formato News para la respuesta
                     news = News(
-                        id=news_item.id,
+                        id=news_id,  # Mantener el ID original
                         title=news_item.title,
                         description=news_item.content[:150] + "..." if len(news_item.content) > 150 else news_item.content,
                         content=news_item.content,
@@ -262,57 +371,17 @@ async def get_news_by_id(news_id: str):
                     return news
                 else:
                     # Si no encontramos la noticia, usar el endpoint de fallback
-                    logger.warning(f"No se encontró la noticia de DF.cl con ID hash, usando fallback: {news_id}")
-                    hash_id = news_id.replace('df.cl-', '')
+                    logger.warning(f"No se encontró la noticia de DF.cl, usando fallback: {normalized_id}")
+                    hash_id = normalized_id.replace('df-', '')
                     # Crear una respuesta de fallback directamente aquí para evitar redirecciones
                     return await get_df_fallback(hash_id)
                     
             except Exception as e:
                 logger.error(f"Error al obtener noticia por ID: {str(e)}", exc_info=True)
                 # En caso de error, también usar el fallback
-                logger.warning(f"Error al procesar noticia de DF.cl, usando fallback: {news_id}")
-                hash_id = news_id.replace('df.cl-', '')
+                logger.warning(f"Error al procesar noticia de DF.cl, usando fallback: {normalized_id}")
+                hash_id = normalized_id.replace('df-', '')
                 return await get_df_fallback(hash_id)
-        
-        # Si es una noticia de DF.cl con otro formato
-        elif "df" in news_id.lower():
-            logger.info(f"Detectada noticia de DF.cl: {news_id}")
-            
-            try:
-                # Usar la función get_by_id que maneja todos los formatos posibles
-                news_item = await get_by_id(news_id)
-                logger.info(f"Resultado de get_by_id: {news_item}")
-            except Exception as e:
-                logger.error(f"Error al obtener noticia por ID: {str(e)}", exc_info=True)
-                raise
-        
-            if news_item:
-                logger.info(f"Noticia de DF.cl encontrada: {news_id}")
-                # Convertir a formato News para la respuesta
-                news = News(
-                    id=news_item.id,
-                    title=news_item.title,
-                    description=news_item.content[:150] + "..." if len(news_item.content) > 150 else news_item.content,
-                    content=news_item.content,
-                    url=news_item.url,
-                    image_url=news_item.image_url,
-                    provider="DF.cl",
-                    category=news_item.category,
-                    created_at=news_item.created_at if hasattr(news_item, 'created_at') else datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                )
-                
-                # Guardar en Firebase para futuras consultas
-                try:
-                    save_article_to_firebase(news)
-                    logger.info(f"Artículo guardado en Firebase: {news_id}")
-                except Exception as e:
-                    logger.error(f"Error al guardar artículo en Firebase: {str(e)}")
-                
-                return news
-            
-            else:
-                logger.warning(f"No se pudo encontrar la noticia con ID: {news_id}")
-                raise HTTPException(status_code=404, detail=f"Noticia con ID {news_id} no encontrada")
         
         # Si el artículo no está en Firebase y no es de DF.cl, buscar en la API de Google News
         logger.info(f"Buscando noticia en Google News: {news_id}")
@@ -330,6 +399,76 @@ async def get_news_by_id(news_id: str):
     except Exception as e:
         logger.error(f"Error al procesar la solicitud: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error al procesar la solicitud: {str(e)}")
+
+async def get_df_fallback(hash_id: str) -> News:
+    """
+    Función de fallback para generar un artículo genérico de DF.cl cuando no se puede encontrar uno real
+    
+    Args:
+        hash_id: ID hash del artículo
+        
+    Returns:
+        Objeto News con información genérica
+    """
+    logger.info(f"Utilizando fallback para artículo DF.cl con hash ID: {hash_id}")
+    
+    try:
+        # Intentar primero con serper
+        from services.serper_service import get_df_article_by_id
+        
+        article_data = await get_df_article_by_id(hash_id)
+        if article_data and 'content' in article_data:
+            logger.info(f"Artículo encontrado con serper en fallback")
+            
+            # Generar resumen con Google Gemini si hay contenido
+            summary = None
+            if article_data.get('content'):
+                from services.gemini_service import generate_summary
+                summary = await generate_summary(article_data['content'])
+            
+            # Crear objeto News con los datos obtenidos
+            news = News(
+                id=f"df.cl-{hash_id}",
+                title=article_data.get('title', 'Artículo de DF.cl'),
+                description=article_data.get('description', ''),
+                content=article_data.get('content', ''),
+                url=article_data.get('url', f"https://www.df.cl/noticias/article/{hash_id}"),
+                image_url=article_data.get('image_url', ''),
+                provider="DF.cl",
+                category=article_data.get('category', 'Noticias'),
+                created_at=article_data.get('created_at', datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+                summary=summary
+            )
+            
+            # Guardar en Firebase para futuras consultas
+            try:
+                save_article_to_firebase(news)
+                logger.info(f"Artículo fallback guardado en Firebase: df.cl-{hash_id}")
+            except Exception as e:
+                logger.error(f"Error al guardar fallback en Firebase: {str(e)}")
+            
+            return news
+    except Exception as e:
+        logger.error(f"Error en fallback principal: {str(e)}", exc_info=True)
+    
+    # Si todo lo demás falla, crear un artículo genérico
+    logger.warning(f"Creando artículo genérico para ID: {hash_id}")
+    
+    generic_news = News(
+        id=f"df.cl-{hash_id}",
+        title="Noticia de Diario Financiero",
+        description="Este contenido está disponible en la versión original del Diario Financiero.",
+        content="El contenido completo de este artículo está disponible en el sitio web del Diario Financiero. " +
+                "Por favor, visite el sitio oficial para acceder al artículo completo.",
+        url=f"https://www.df.cl",
+        image_url="https://www.df.cl/noticias/site/artic/20170830/imag/foto_0000000420170830125823.jpg",
+        provider="DF.cl",
+        category="Noticias",
+        created_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        summary="Este es un artículo del Diario Financiero. El contenido completo está disponible en su sitio web oficial."
+    )
+    
+    return generic_news
 
 @router.get("/df-scrape/{df_id}", response_model=News)
 async def get_df_news_by_scraping(df_id: str):

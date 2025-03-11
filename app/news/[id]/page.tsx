@@ -32,11 +32,23 @@ export default async function NewsPage({ params }: Props) {
   console.log('Página de noticia - ID recibido:', id);
   
   try {
-    // Si el ID comienza con 'df-', es una noticia de DF.cl
-    if (id.startsWith('df-')) {
+    // Si el ID comienza con 'df-' o 'df.cl-', es una noticia de DF.cl
+    if (id.startsWith('df-') || id.startsWith('df.cl-')) {
       console.log('Intentando obtener noticia de DF.cl con ID:', id);
       
-      const article = await getNewsById(id);
+      // Normalizar el ID para asegurar que tenga el formato correcto para el backend
+      // El backend espera un ID en formato 'df-XXX'
+      let normalizedId;
+      if (id.startsWith('df.cl-')) {
+        normalizedId = 'df-' + id.substring(6);
+        console.log('ID normalizado de df.cl- a df-:', normalizedId);
+      } else {
+        normalizedId = id; // Ya tiene el formato df-XXX
+      }
+      
+      console.log('ID normalizado para el backend:', normalizedId);
+      
+      const article = await getNewsById(normalizedId);
       console.log('Resultado de getNewsById:', article ? 'Noticia encontrada' : 'Noticia no encontrada');
       
       if (!article) {
